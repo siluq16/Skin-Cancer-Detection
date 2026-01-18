@@ -19,7 +19,7 @@ def load_ensemble_models():
     def load_single_model(arch_type, path):
         model = None
         try:
-            checkpoint = torch.load(path, map_location=device)
+            checkpoint = torch.load(path, map_location=torch.device('cpu'))
             state_dict = checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint
             
             if arch_type == 'resnet50':
