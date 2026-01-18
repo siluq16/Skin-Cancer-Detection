@@ -44,7 +44,7 @@ def load_ensemble_models():
 
     # Load 3 model
     m_res = load_single_model('resnet50', 'skin_resnet50.pth')
-    m_dense = load_single_model('densenet121', 'best_densenet121_final.pth')
+    m_dense = load_single_model('densenet121', 'best_densenet121.pth')
     m_eff = load_single_model('efficientnet_b4', 'best_efficientnet_b4.pth')
     
     return m_res, m_dense, m_eff
