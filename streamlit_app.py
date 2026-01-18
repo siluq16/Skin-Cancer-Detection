@@ -75,8 +75,8 @@ uploaded_file = st.file_uploader("Chọn ảnh...", type=["jpg", "png", "jpeg"])
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert('RGB')
-    st.image(image, caption='Ảnh đã tải lên', width=None)
-    
+    st.image(image, caption='Ảnh đã tải lên', use_container_width=True)
+
     if st.button('🔍 Phân tích chi tiết (380px)'):
         progress_bar = st.progress(0, text="Đang khởi tạo...")
         
