@@ -153,7 +153,8 @@ if uploaded_file is not None:
                 st.warning(f"### ℹ KẾT QUẢ: {labels_map[pred_idx]}")
                 
             st.info(f"Độ tin cậy: **{confidence:.2f}%**")
-            st.bar_chart(final_prob.detach().numpy()[0])
+            probs = final_prob.detach().cpu().numpy()[0]
+            st.bar_chart({labels_map[i]: probs[i] for i in range(7)})
             
         except Exception as e:
             st.error(f"Có lỗi xảy ra: {e}")
