@@ -4,21 +4,21 @@ import torch.nn as nn
 from torchvision import models, transforms
 import torch.nn.functional as F
 from PIL import Image
-import gc # <--- MỚI: Thư viện dọn rác bộ nhớ
 
-# --- CẤU HÌNH ---
+# --- 1. CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Chẩn đoán Ung thư da", page_icon="🩺")
-st.title("🩺 Hệ thống Chẩn đoán Ung thư Da")
+st.title("🩺 Hệ thống Chẩn đoán Ung thư Da (Ensemble AI)")
+st.write("Tải lên hình ảnh vết thương da để hệ thống phân tích.")
 
-# Ép chạy CPU để tránh lỗi CUDA trên Cloud và tiết kiệm VRAM ảo
-device = torch.device('cpu') 
+# --- 2. LOAD MODEL (Sử dụng Cache để không phải load lại mỗi lần) ---
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-@st.cache_resource # <--- QUAN TRỌNG: Giữ model trong cache để không load lại
+@st.cache_resource
 def load_ensemble_models():
+    # Khai báo hàm load model (Code đã sửa chuẩn của bạn)
     def load_single_model(arch_type, path):
         model = None
         try:
-            # map_location=device là CPU
             checkpoint = torch.load(path, map_location=device)
             state_dict = checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint
             
@@ -40,66 +40,91 @@ def load_ensemble_models():
             model.eval()
             return model
         except Exception as e:
+            st.error(f"Lỗi load {arch_type}: {e}")
             return None
 
-    # Load 3 model
+    # ĐỔI ĐƯỜNG DẪN TỚI FILE TRÊN MÁY BẠN
     m_res = load_single_model('resnet50', 'skin_resnet50.pth')
-    m_dense = load_single_model('densenet121', 'best_densenet121.pth')
+    m_dense = load_single_model('densenet121', 'best_densenet121.pth') # File DenseNet mới train lại
     m_eff = load_single_model('efficientnet_b4', 'best_efficientnet_b4.pth')
     
     return m_res, m_dense, m_eff
 
-# Load models
-with st.spinner('Đang khởi động AI...'):
+# Load model ngay khi vào app
+with st.spinner('Đang khởi động "Tam giác vàng" AI... Vui lòng đợi!'):
     model_resnet, model_dense, model_eff = load_ensemble_models()
 
 if model_resnet and model_dense and model_eff:
-    st.success("✅ Hệ thống sẵn sàng!")
+    st.success("✅ Hệ thống đã sẵn sàng!")
 
-# --- XỬ LÝ ẢNH ---
-labels_map = { 0: 'AKIEC (Dày sừng quang hóa)', 1: 'BCC (Ung thư biểu mô tế bào đáy)', 2: 'BKL (Tổn thương lành tính)', 3: 'DF (U xơ da)', 4: 'MEL (Ung thư hắc tố - Nguy hiểm)', 5: 'NV (Nốt ruồi lành tính)', 6: 'VASC (Tổn thương mạch máu)' }
+# --- 3. XỬ LÝ ẢNH ---
+labels_map = {
+    0: 'AKIEC (Dày sừng quang hóa)',
+    1: 'BCC (Ung thư biểu mô tế bào đáy)',
+    2: 'BKL (Tổn thương lành tính)',
+    3: 'DF (U xơ da)',
+    4: 'MEL (Ung thư hắc tố - Nguy hiểm)',
+    5: 'NV (Nốt ruồi lành tính)',
+    6: 'VASC (Tổn thương mạch máu)'
+}
 
+def process_image(image):
+    # Transform cho EfficientNet (380)
+    transform_eff = transforms.Compose([
+        transforms.Resize((400, 400)),
+        transforms.CenterCrop(380),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    img_tensor = transform_eff(image).unsqueeze(0).to(device)
+    return img_tensor
+
+# --- 4. GIAO DIỆN CHÍNH ---
 uploaded_file = st.file_uploader("Chọn ảnh...", type=["jpg", "png", "jpeg"])
 
 if uploaded_file is not None:
+    # Hiển thị ảnh
     image = Image.open(uploaded_file).convert('RGB')
-    # SỬA LỖI WARNING: Dùng use_container_width thay vì use_column_width
-    st.image(image, caption='Ảnh tải lên', use_container_width=True) 
+    st.image(image, caption='Ảnh đã tải lên', use_column_width=True)
     
-    if st.button('🔍 Phân tích'):
-        with st.spinner('Đang xử lý...'):
-            # Transform
-            transform = transforms.Compose([
-                transforms.Resize((224, 224)), # Dùng ảnh nhỏ 224 cho tất cả để tiết kiệm RAM (chấp nhận giảm nhẹ độ chính xác EfficientNet)
-                transforms.ToTensor(),
-                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-            ])
+    if st.button('🔍 Phân tích ngay'):
+        with st.spinner('Đang hội chẩn 3 chuyên gia AI...'):
+            img_tensor = process_image(image)
             
-            img_tensor = transform(image).unsqueeze(0).to(device)
+            # 1. EfficientNet (Chạy ảnh gốc 380)
+            out_eff = model_eff(img_tensor)
+            prob_eff = F.softmax(out_eff, dim=1)
+
+            # 2. ResNet & DenseNet (Resize xuống 224)
+            img_small = F.interpolate(img_tensor, size=(224, 224), mode='bilinear')
             
-            # Inference (Dùng with torch.no_grad để không tốn RAM lưu gradient)
-            with torch.no_grad():
-                out_res = model_resnet(img_tensor)
-                prob_res = F.softmax(out_res, dim=1)
-                
-                out_dense = model_dense(img_tensor)
-                prob_dense = F.softmax(out_dense, dim=1)
+            out_res = model_resnet(img_small)
+            prob_res = F.softmax(out_res, dim=1)
+            
+            out_dense = model_dense(img_small)
+            prob_dense = F.softmax(out_dense, dim=1)
 
-                # Resize lên 380 cho EfficientNet (nếu RAM chịu nổi)
-                # Hoặc dùng luôn ảnh 224 cho EfficientNet để tránh crash (chấp nhận hy sinh chút độ chính xác)
-                img_380 = F.interpolate(img_tensor, size=(380, 380), mode='bilinear')
-                out_eff = model_eff(img_380)
-                prob_eff = F.softmax(out_eff, dim=1)
-
-                final_prob = (prob_res * 0.4) + (prob_dense * 0.3) + (prob_eff * 0.3)
-                top_p, top_class = torch.max(final_prob, 1)
-                
-                # --- DỌN RÁC NGAY LẬP TỨC ---
-                del img_tensor, img_380, out_res, out_dense, out_eff
-                gc.collect()
-
+            # 3. Ensemble (Weighted Average)
+            # Trọng số bạn có thể tùy chỉnh
+            final_prob = (prob_res * 0.4) + (prob_dense * 0.3) + (prob_eff * 0.3)
+            
+            # Lấy kết quả
+            top_p, top_class = torch.max(final_prob, 1)
             pred_idx = top_class.item()
             confidence = top_p.item() * 100
 
-        st.info(f"Kết quả: **{labels_map[pred_idx]}** ({confidence:.2f}%)")
-        st.bar_chart(final_prob.detach().numpy()[0])
+        # Hiển thị kết quả
+        st.markdown("---")
+        if pred_idx in [1, 4]: # Các lớp Ung thư nguy hiểm
+            st.error(f"### ⚠ KẾT QUẢ: {labels_map[pred_idx]}")
+        elif pred_idx in [2, 5]: # Lành tính
+            st.success(f"### 🎉 KẾT QUẢ: {labels_map[pred_idx]}")
+        else:
+            st.warning(f"### ℹ KẾT QUẢ: {labels_map[pred_idx]}")
+            
+        st.info(f"Độ tin cậy: **{confidence:.2f}%**")
+        
+        # Show chi tiết xác suất
+        st.write("Chi tiết xác suất các lớp:")
+        probs = final_prob.detach().cpu().numpy()[0]
+        st.bar_chart({labels_map[i]: probs[i] for i in range(7)})
